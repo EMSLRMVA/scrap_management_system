@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as xls;
@@ -10,7 +9,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:permission_handler/permission_handler.dart';
@@ -22,6 +20,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../core/app_branding.dart';
 import '../core/enterprise_theme.dart';
+import '../core/file_helpers.dart';
 import '../core/money_format.dart';
 import '../domain/business_models.dart';
 import '../domain/stock_calculation.dart';
@@ -9352,12 +9351,15 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
       'customers': state.customers.length,
       'summary': state.reportSummary,
     });
-    final directory = await getTemporaryDirectory();
-    final file = File(
-      '${directory.path}${Platform.pathSeparator}scrap_backup.json',
-    );
-    await file.writeAsString(backup);
-    if (mounted) _snack(context, 'Backup exported: ${file.path}');
+    if (kIsWeb) {
+      await Clipboard.setData(ClipboardData(text: backup));
+      if (mounted) {
+        _snack(context, 'Backup JSON copied to clipboard. Save it manually.');
+      }
+      return;
+    }
+    final path = await saveTextFile('scrap_backup.json', backup);
+    if (mounted) _snack(context, 'Backup exported: $path');
   }
 }
 
@@ -10465,7 +10467,7 @@ class _DocumentAiReviewScreenState
     final duplicates = service.findDuplicates(state, draft);
     final proofName = _proofPath.trim().isEmpty
         ? 'No proof attached'
-        : _proofPath.split(Platform.pathSeparator).last;
+        : fileNameFromPath(_proofPath);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Document AI Review')),
@@ -11255,13 +11257,26 @@ class ExportBar extends StatelessWidget {
     final bytes = reportBundle == null
         ? _buildXlsx(title, table)
         : _buildReportXlsx(reportBundle);
-    final directory = await getTemporaryDirectory();
-    final file = File(
-      '${directory.path}${Platform.pathSeparator}${_safeName(title)}.xlsx',
-    );
-    await file.writeAsBytes(bytes, flush: true);
+    final fileName = '${_safeName(title)}.xlsx';
+    if (kIsWeb) {
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [
+            XFile.fromData(
+              Uint8List.fromList(bytes),
+              name: fileName,
+              mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ),
+          ],
+          fileNameOverrides: [fileName],
+          subject: title,
+        ),
+      );
+      return;
+    }
+    final path = await saveBytesFile(fileName, bytes);
     if (context.mounted) {
-      _snack(context, 'Excel saved: ${file.path}');
+      _snack(context, 'Excel saved: $path');
     }
   }
 }
@@ -11447,8 +11462,7 @@ class EntityAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final file = path.isEmpty ? null : File(path);
-    final exists = file != null && file.existsSync();
+    final exists = path.isNotEmpty && localFileExists(path);
     return ClipRRect(
       borderRadius: BorderRadius.circular(size / 4),
       child: Container(
@@ -11456,7 +11470,7 @@ class EntityAvatar extends StatelessWidget {
         height: size,
         color: EnterpriseTheme.primary.withValues(alpha: 0.18),
         child: exists
-            ? Image.file(file, fit: BoxFit.cover)
+            ? localImageFromPath(path, fit: BoxFit.cover)
             : Icon(icon, color: EnterpriseTheme.primary, size: size * 0.48),
       ),
     );
@@ -13109,20 +13123,34 @@ Future<void> downloadPurchaseInvoicePdf(
     final bytes = await _buildPurchaseInvoicePdf(state, purchase);
     final fileName =
         'purchase_invoice_${_safeName(purchase.invoiceNumber)}.pdf';
-    final directory = await getApplicationDocumentsDirectory();
-    final invoiceDir = Directory(
-      '${directory.path}${Platform.pathSeparator}purchase_invoices',
-    );
-    if (!await invoiceDir.exists()) {
-      await invoiceDir.create(recursive: true);
+    if (kIsWeb) {
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [
+            XFile.fromData(bytes, name: fileName, mimeType: 'application/pdf'),
+          ],
+          fileNameOverrides: [fileName],
+          subject: 'Purchase Invoice ${purchase.invoiceNumber}',
+          text: purchaseInvoiceWhatsAppMessage(purchase),
+        ),
+      );
+      ref
+          .read(businessProvider.notifier)
+          .recordPurchaseInvoiceGenerated(purchase);
+      return;
     }
-    final file = File('${invoiceDir.path}${Platform.pathSeparator}$fileName');
-    await file.writeAsBytes(bytes, flush: true);
+
+    final path = await saveBytesFile(
+      fileName,
+      bytes,
+      documents: true,
+      subdirectory: 'purchase_invoices',
+    );
     ref
         .read(businessProvider.notifier)
         .recordPurchaseInvoiceGenerated(purchase);
     if (context.mounted) {
-      _snack(context, 'Purchase invoice saved: ${file.path}');
+      _snack(context, 'Purchase invoice saved: $path');
     }
   } catch (error) {
     if (context.mounted) {

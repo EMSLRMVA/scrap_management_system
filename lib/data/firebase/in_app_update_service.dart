@@ -1,5 +1,4 @@
-import 'dart:io';
-
+import 'package:flutter/foundation.dart';
 import 'package:in_app_update/in_app_update.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -51,7 +50,7 @@ class InAppUpdateService {
   }
 
   Future<bool> startUpdate(AppUpdateDecision decision) async {
-    if (Platform.isAndroid) {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       try {
         final updateInfo = await InAppUpdate.checkForUpdate();
         if (updateInfo.updateAvailability ==

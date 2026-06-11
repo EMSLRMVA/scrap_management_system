@@ -1,6 +1,5 @@
 import 'dart:convert';
-import 'dart:io';
-
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -64,31 +63,20 @@ class AppThemeController extends AsyncNotifier<AppThemeModel> {
     if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
       throw const FormatException('Enter a valid theme JSON URL.');
     }
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 12);
-    try {
-      final request = await client.getUrl(uri);
-      final response = await request.close().timeout(
-        const Duration(seconds: 18),
-      );
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw HttpException('Theme server returned ${response.statusCode}.');
-      }
-      final raw = await response.transform(utf8.decoder).join();
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map<String, dynamic>) {
-        throw const FormatException('Theme JSON must be an object.');
-      }
-      final theme = AppThemeModel.fromJson(
-        decoded,
-        id: _importedId(decoded),
-        imported: true,
-      );
-      _validateTheme(theme);
-      return theme;
-    } finally {
-      client.close(force: true);
+    final raw = await NetworkAssetBundle(
+      Uri.base,
+    ).loadString(uri.toString()).timeout(const Duration(seconds: 18));
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Theme JSON must be an object.');
     }
+    final theme = AppThemeModel.fromJson(
+      decoded,
+      id: _importedId(decoded),
+      imported: true,
+    );
+    _validateTheme(theme);
+    return theme;
   }
 
   Future<AppThemeModel> importThemeFromUrl(String url) async {

@@ -1,6 +1,5 @@
 import 'dart:async';
-import 'dart:io';
-
+import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -482,5 +481,16 @@ String _emailAuthError(FirebaseAuthException error) {
 }
 
 String _deviceInfo() {
-  return '${Platform.operatingSystem} ${Platform.operatingSystemVersion}';
+  if (kIsWeb) {
+    return 'web ${defaultTargetPlatform.name}';
+  }
+
+  return switch (defaultTargetPlatform) {
+    TargetPlatform.android => 'android',
+    TargetPlatform.iOS => 'ios',
+    TargetPlatform.macOS => 'macos',
+    TargetPlatform.windows => 'windows',
+    TargetPlatform.linux => 'linux',
+    TargetPlatform.fuchsia => 'fuchsia',
+  };
 }
