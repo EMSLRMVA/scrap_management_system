@@ -1,4 +1,7 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
+
+import '../firebase_options.dart';
 
 class FirebaseStatus {
   const FirebaseStatus({required this.isReady, this.message});
@@ -16,12 +19,13 @@ class FirebaseBootstrap {
     Duration timeout = const Duration(seconds: 8),
   }) {
     _initialization ??= _initialize();
+
     return _initialization!.timeout(
       timeout,
       onTimeout: () => const FirebaseStatus(
         isReady: false,
         message:
-            'Firebase is taking too long to start. Check emulator internet/DNS, or continue in offline demo mode.',
+            'Firebase is taking too long to start. Check internet/DNS, or continue in offline demo mode.',
       ),
     );
   }
@@ -31,7 +35,15 @@ class FirebaseBootstrap {
       if (Firebase.apps.isNotEmpty) {
         return const FirebaseStatus(isReady: true);
       }
-      await Firebase.initializeApp();
+
+      if (kIsWeb) {
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.web,
+        );
+      } else {
+        await Firebase.initializeApp();
+      }
+
       return const FirebaseStatus(isReady: true);
     } catch (error) {
       return FirebaseStatus(
