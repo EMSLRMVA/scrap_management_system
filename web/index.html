@@ -18,16 +18,19 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="EMSLRMVA Export Scrap System">
+  <meta name="theme-color" content="#07111F">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="Scrap System">
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 
   <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon.png"/>
 
   <title>Scrap System</title>
   <link rel="manifest" href="manifest.json">
@@ -72,19 +75,45 @@
   <script>
     (function () {
       const versionKey = 'scrap_system_web_build';
+      const reloadKey = 'scrap_system_web_build_reload';
+      const serviceWorkerCleanupKey = 'scrap_system_sw_cleanup_done';
       const checkIntervalMs = 15 * 60 * 1000;
 
       function latestVersionId(data) {
-        return [data.version, data.build_number, data.build_signature]
+        return [
+          data.version,
+          data.build_number,
+          data.build_signature,
+          data.git_sha,
+          data.github_run_number,
+        ]
           .filter(Boolean)
           .join('+');
       }
 
-      function showUpdateBanner(nextVersion) {
+      function versionedUrl(path, version) {
+        const url = new URL(path, document.baseURI);
+        if (version) {
+          url.searchParams.set('v', version);
+        }
+        return url.toString();
+      }
+
+      function currentUrlWithVersion(version) {
+        const url = new URL(window.location.href);
+        url.searchParams.set('v', version);
+        return url.toString();
+      }
+
+      function showUpdateBanner(nextVersion, message) {
         const banner = document.getElementById('app-update-banner');
         const refresh = document.getElementById('app-update-refresh');
         if (!banner || !refresh) {
           return;
+        }
+        const label = banner.querySelector('span');
+        if (label && message) {
+          label.textContent = message;
         }
         banner.style.display = 'flex';
         refresh.onclick = function () {
@@ -93,47 +122,127 @@
           } catch (_) {
             // Storage can be disabled; reload still gets the latest deployment.
           }
-          window.location.reload();
+          window.location.replace(currentUrlWithVersion(nextVersion));
         };
       }
 
-      async function checkForWebUpdate() {
+      async function clearOldFlutterCaches() {
+        if (!('caches' in window)) {
+          return;
+        }
+        const keys = await window.caches.keys();
+        await Promise.all(
+          keys
+            .filter(function (key) {
+              const lower = key.toLowerCase();
+              return lower.includes('flutter') || lower.includes('scrap');
+            })
+            .map(function (key) {
+              return window.caches.delete(key);
+            })
+        );
+      }
+
+      async function removeOldServiceWorkers() {
+        if (!('serviceWorker' in navigator)) {
+          return false;
+        }
+        const hadController = Boolean(navigator.serviceWorker.controller);
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(
+          registrations.map(function (registration) {
+            return registration.unregister();
+          })
+        );
+        await clearOldFlutterCaches();
+        return hadController || registrations.length > 0;
+      }
+
+      async function cleanupStaleRuntime() {
         try {
-          const response = await fetch('version.json?ts=' + Date.now(), {
-            cache: 'no-store',
-          });
-          if (!response.ok) {
-            return;
+          const removedWorker = await removeOldServiceWorkers();
+          if (
+            removedWorker &&
+            window.sessionStorage.getItem(serviceWorkerCleanupKey) !== 'done'
+          ) {
+            window.sessionStorage.setItem(serviceWorkerCleanupKey, 'done');
+            window.location.reload();
+            return true;
           }
-          const version = latestVersionId(await response.json());
+        } catch (_) {
+          // Flutter can still boot if browser storage APIs are blocked.
+        }
+        return false;
+      }
+
+      async function readLatestVersion() {
+        const response = await fetch('version.json?ts=' + Date.now(), {
+          cache: 'no-store',
+        });
+        if (!response.ok) {
+          return '';
+        }
+        return latestVersionId(await response.json());
+      }
+
+      async function checkForWebUpdate(options) {
+        const allowReload = Boolean(options && options.allowReload);
+        try {
+          const version = await readLatestVersion();
           if (!version) {
-            return;
+            return '';
           }
           const current = window.localStorage.getItem(versionKey);
           if (current && current !== version) {
-            showUpdateBanner(version);
-            return;
+            window.localStorage.setItem(versionKey, version);
+            if (
+              allowReload &&
+              window.sessionStorage.getItem(reloadKey) !== version
+            ) {
+              window.sessionStorage.setItem(reloadKey, version);
+              showUpdateBanner(version, 'Updating app...');
+              window.location.replace(currentUrlWithVersion(version));
+              return null;
+            }
+            showUpdateBanner(version, 'New update available');
+            return version;
           }
           window.localStorage.setItem(versionKey, version);
+          if (window.sessionStorage.getItem(reloadKey) === version) {
+            window.sessionStorage.removeItem(reloadKey);
+          }
+          return version;
         } catch (_) {
           // Offline or first install; Flutter continues to boot normally.
+          return '';
         }
       }
 
-      window.addEventListener('load', function () {
-        checkForWebUpdate();
-        window.setInterval(checkForWebUpdate, checkIntervalMs);
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.ready
-            .then(function (registration) {
-              registration.update();
-              window.setInterval(function () {
-                registration.update();
-              }, 60 * 60 * 1000);
-            })
-            .catch(function () {});
+      function loadFlutter(version) {
+        const script = document.createElement('script');
+        script.src = versionedUrl(
+          'flutter_bootstrap.js',
+          version || Date.now().toString()
+        );
+        script.async = true;
+        document.body.appendChild(script);
+      }
+
+      async function bootFlutterApp() {
+        if (await cleanupStaleRuntime()) {
+          return;
         }
-      });
+        const version = await checkForWebUpdate({ allowReload: true });
+        if (version === null) {
+          return;
+        }
+        loadFlutter(version);
+        window.setInterval(function () {
+          checkForWebUpdate({ allowReload: true });
+        }, checkIntervalMs);
+      }
+
+      bootFlutterApp();
     })();
   </script>
   <!--
@@ -144,6 +253,5 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
-  <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
