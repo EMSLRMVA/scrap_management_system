@@ -1,4 +1,5 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import '../firebase_options.dart';
@@ -36,6 +37,7 @@ class FirebaseBootstrap {
         return const FirebaseStatus(isReady: true);
       }
       await _initializeFirebaseApp();
+      await _configureAuthPersistence();
 
       return const FirebaseStatus(isReady: true);
     } catch (error) {
@@ -52,5 +54,12 @@ class FirebaseBootstrap {
       return Firebase.initializeApp(options: DefaultFirebaseOptions.web);
     }
     return Firebase.initializeApp();
+  }
+
+  static Future<void> _configureAuthPersistence() async {
+    if (!kIsWeb) {
+      return;
+    }
+    await FirebaseAuth.instance.setPersistence(Persistence.LOCAL);
   }
 }

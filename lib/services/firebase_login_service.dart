@@ -66,6 +66,7 @@ class FirebaseLoginService {
       }
       return _profileForUser(user, writeLogin: true);
     } on FirebaseAuthException catch (error) {
+      _logAuthError('signIn', error);
       throw FirebaseLoginException(_emailAuthError(error));
     } on TimeoutException {
       throw const FirebaseLoginException(
@@ -137,6 +138,7 @@ class FirebaseLoginService {
       );
       return profile;
     } on FirebaseAuthException catch (error) {
+      _logAuthError('register', error);
       throw FirebaseLoginException(_emailAuthError(error));
     } on TimeoutException {
       throw const FirebaseLoginException(
@@ -151,7 +153,11 @@ class FirebaseLoginService {
         _auth.sendPasswordResetEmail(email: _cleanEmail(email)),
       );
     } on FirebaseAuthException catch (error) {
-      throw FirebaseLoginException(_emailAuthError(error));
+      _logAuthError('passwordReset', error);
+      if (error.code == 'user-not-found') {
+        return;
+      }
+      throw FirebaseLoginException(_passwordResetAuthError(error));
     } on TimeoutException {
       throw const FirebaseLoginException(
         'Firebase password reset timed out. Check emulator internet/DNS.',
@@ -333,7 +339,9 @@ class FirebaseLoginService {
     }, SetOptions(merge: true));
 
     final storedRole = _roleFromFirestore(data['role']);
-    final effectiveRole = storedRole.isOwnerOrAdmin ? UserRole.manager : storedRole;
+    final effectiveRole = storedRole.isOwnerOrAdmin
+        ? UserRole.manager
+        : storedRole;
     if (storedRole.isOwnerOrAdmin) {
       await userRef.set({
         'role': effectiveRole.name,
@@ -462,22 +470,51 @@ UserRole _roleFromFirestore(Object? value) {
 String _emailAuthError(FirebaseAuthException error) {
   switch (error.code) {
     case 'invalid-email':
-      return 'Enter a valid email address.';
+      return 'Invalid email format.';
     case 'user-disabled':
-      return 'Your account is disabled. Contact admin.';
+      return 'This user account is disabled.';
     case 'user-not-found':
+      return 'User not registered. Please register first.';
     case 'wrong-password':
+      return 'Wrong password.';
     case 'invalid-credential':
-      return 'Invalid email or password.';
+      return 'Invalid email or password, or password was changed.';
     case 'email-already-in-use':
       return 'This email is already registered.';
     case 'weak-password':
       return 'Password must be at least 6 characters.';
     case 'network-request-failed':
-      return 'Network error. Firebase cannot be reached. Check emulator internet/DNS and try again.';
+      return 'Network/Firebase connection problem.';
+    case 'too-many-requests':
+      return 'Too many attempts. Try later.';
+    case 'operation-not-allowed':
+      return 'Email/password login is not enabled in Firebase.';
+    case 'unauthorized-domain':
+      return 'This domain is not authorized in Firebase.';
     default:
       return error.message ?? 'Authentication failed.';
   }
+}
+
+String _passwordResetAuthError(FirebaseAuthException error) {
+  switch (error.code) {
+    case 'invalid-email':
+      return 'Invalid email format.';
+    case 'network-request-failed':
+      return 'Network/Firebase connection problem.';
+    case 'too-many-requests':
+      return 'Too many attempts. Try later.';
+    case 'operation-not-allowed':
+      return 'Email/password login is not enabled in Firebase.';
+    case 'unauthorized-domain':
+      return 'This domain is not authorized in Firebase.';
+    default:
+      return error.message ?? 'Password reset failed.';
+  }
+}
+
+void _logAuthError(String action, FirebaseAuthException error) {
+  debugPrint('FirebaseAuth $action failed: ${error.code}');
 }
 
 String _deviceInfo() {

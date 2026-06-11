@@ -43,6 +43,8 @@ const _expenseCategories = [
 ];
 
 const _paymentModes = ['Cash', 'UPI', 'Bank', 'Other'];
+const _rememberLoginEmailKey = 'remember_login_email';
+const _lastLoginEmailKey = 'last_login_email';
 
 final authProfileProvider =
     NotifierProvider<AuthProfileController, AuthenticatedProfile?>(
@@ -85,13 +87,19 @@ class _OwnerLoginGateState extends ConsumerState<OwnerLoginGate> {
   bool _submitting = false;
   bool _showRegister = false;
   bool _showForgotPassword = false;
+  bool _rememberEmail = true;
+  bool _passwordVisible = false;
+  bool _registerPasswordVisible = false;
   String? _errorMessage;
 
   @override
   void initState() {
     super.initState();
     _email.text = ownerEmail;
-    Future.microtask(_restoreSession);
+    Future.microtask(() async {
+      await _loadRememberedEmail();
+      await _restoreSession();
+    });
   }
 
   @override
@@ -123,6 +131,35 @@ class _OwnerLoginGateState extends ConsumerState<OwnerLoginGate> {
       if (mounted) {
         setState(() => _loadingSession = false);
       }
+    }
+  }
+
+  Future<void> _loadRememberedEmail() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final remember = prefs.getBool(_rememberLoginEmailKey) ?? true;
+      final savedEmail = prefs.getString(_lastLoginEmailKey)?.trim() ?? '';
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _rememberEmail = remember;
+        if (remember && savedEmail.isNotEmpty) {
+          _email.text = savedEmail;
+        }
+      });
+    } catch (_) {
+      // Remembering the email is only a convenience.
+    }
+  }
+
+  Future<void> _rememberSuccessfulLogin(String email) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_rememberLoginEmailKey, _rememberEmail);
+    if (_rememberEmail) {
+      await prefs.setString(_lastLoginEmailKey, email);
+    } else {
+      await prefs.remove(_lastLoginEmailKey);
     }
   }
 
@@ -202,209 +239,261 @@ class _OwnerLoginGateState extends ConsumerState<OwnerLoginGate> {
   }
 
   Widget _loginForm() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        TextField(
-          controller: _email,
-          keyboardType: TextInputType.emailAddress,
-          textInputAction: TextInputAction.next,
-          decoration: const InputDecoration(
-            labelText: 'Email',
-            prefixIcon: Icon(Icons.email_outlined),
+    return AutofillGroup(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _email,
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.next,
+            autofillHints: const [AutofillHints.email, AutofillHints.username],
+            decoration: const InputDecoration(
+              labelText: 'Email',
+              prefixIcon: Icon(Icons.email_outlined),
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _password,
-          obscureText: true,
-          decoration: const InputDecoration(
-            labelText: 'Password',
-            prefixIcon: Icon(Icons.lock_outline),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _password,
+            obscureText: !_passwordVisible,
+            textInputAction: TextInputAction.done,
+            autofillHints: const [AutofillHints.password],
+            decoration: InputDecoration(
+              labelText: 'Password',
+              prefixIcon: const Icon(Icons.lock_outline),
+              suffixIcon: IconButton(
+                tooltip: _passwordVisible ? 'Hide password' : 'Show password',
+                onPressed: () =>
+                    setState(() => _passwordVisible = !_passwordVisible),
+                icon: Icon(
+                  _passwordVisible
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                ),
+              ),
+            ),
+            onSubmitted: (_) => _login(),
           ),
-          onSubmitted: (_) => _login(),
-        ),
-        if (_errorMessage != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            _errorMessage!,
-            style: const TextStyle(color: EnterpriseTheme.error),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _rememberEmail,
+            onChanged: _submitting
+                ? null
+                : (value) => setState(() => _rememberEmail = value ?? true),
+            title: const Text('Remember email'),
+            controlAffinity: ListTileControlAffinity.leading,
           ),
-        ],
-        const SizedBox(height: 16),
-        FilledButton.icon(
-          onPressed: _submitting ? null : _login,
-          icon: _submitting
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.login),
-          label: const Text('Login'),
-        ),
-        const SizedBox(height: 10),
-        OutlinedButton.icon(
-          onPressed: _submitting
-              ? null
-              : () => setState(() {
-                  _showRegister = true;
-                  _showForgotPassword = false;
-                  _errorMessage = null;
-                }),
-          icon: const Icon(Icons.person_add_alt_1),
-          label: const Text('Register New User'),
-        ),
-        TextButton(
-          onPressed: _submitting
-              ? null
-              : () => setState(() {
-                  _showForgotPassword = true;
-                  _showRegister = false;
-                  _resetEmail.text = _email.text;
-                  _errorMessage = null;
-                }),
-          child: const Text('Forgot Password'),
-        ),
-        if (kDebugMode) ...[
-          const SizedBox(height: 8),
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _errorMessage!,
+              style: const TextStyle(color: EnterpriseTheme.error),
+            ),
+          ],
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: _submitting ? null : _login,
+            icon: _submitting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.login),
+            label: const Text('Login'),
+          ),
+          const SizedBox(height: 10),
           OutlinedButton.icon(
-            onPressed: _openDebugOwnerDemo,
-            icon: const Icon(Icons.offline_bolt_outlined),
-            label: const Text('Open Debug Owner Demo'),
+            onPressed: _submitting
+                ? null
+                : () => setState(() {
+                    _showRegister = true;
+                    _showForgotPassword = false;
+                    _errorMessage = null;
+                  }),
+            icon: const Icon(Icons.person_add_alt_1),
+            label: const Text('Register New User'),
           ),
-          const SizedBox(height: 6),
-          const Text(
-            'Use only when emulator DNS/network blocks Firebase login.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Color(0xFF64748B), fontSize: 11),
+          TextButton(
+            onPressed: _submitting
+                ? null
+                : () => setState(() {
+                    _showForgotPassword = true;
+                    _showRegister = false;
+                    _resetEmail.text = _normalizedEmail(_email.text);
+                    _errorMessage = null;
+                  }),
+            child: const Text('Forgot Password'),
           ),
+          if (kDebugMode) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _openDebugOwnerDemo,
+              icon: const Icon(Icons.offline_bolt_outlined),
+              label: const Text('Open Debug Owner Demo'),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Use only when emulator DNS/network blocks Firebase login.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Color(0xFF64748B), fontSize: 11),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 
   Widget _registerForm() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        TextField(
-          controller: _registerName,
-          decoration: const InputDecoration(
-            labelText: 'Name',
-            prefixIcon: Icon(Icons.person_outline),
+    return AutofillGroup(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _registerName,
+            autofillHints: const [AutofillHints.name],
+            decoration: const InputDecoration(
+              labelText: 'Name',
+              prefixIcon: Icon(Icons.person_outline),
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _registerEmail,
-          keyboardType: TextInputType.emailAddress,
-          decoration: const InputDecoration(
-            labelText: 'Email',
-            prefixIcon: Icon(Icons.email_outlined),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _registerEmail,
+            keyboardType: TextInputType.emailAddress,
+            autofillHints: const [AutofillHints.email, AutofillHints.username],
+            decoration: const InputDecoration(
+              labelText: 'Email',
+              prefixIcon: Icon(Icons.email_outlined),
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _registerPassword,
-          obscureText: true,
-          decoration: const InputDecoration(
-            labelText: 'Password',
-            prefixIcon: Icon(Icons.lock_outline),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _registerPassword,
+            obscureText: !_registerPasswordVisible,
+            autofillHints: const [AutofillHints.newPassword],
+            decoration: InputDecoration(
+              labelText: 'Password',
+              prefixIcon: const Icon(Icons.lock_outline),
+              suffixIcon: IconButton(
+                tooltip: _registerPasswordVisible
+                    ? 'Hide password'
+                    : 'Show password',
+                onPressed: () => setState(
+                  () => _registerPasswordVisible = !_registerPasswordVisible,
+                ),
+                icon: Icon(
+                  _registerPasswordVisible
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                ),
+              ),
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: _registerMobile,
-          keyboardType: TextInputType.phone,
-          decoration: const InputDecoration(
-            labelText: 'Mobile optional',
-            prefixIcon: Icon(Icons.phone_android),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _registerMobile,
+            keyboardType: TextInputType.phone,
+            autofillHints: const [AutofillHints.telephoneNumber],
+            decoration: const InputDecoration(
+              labelText: 'Mobile optional',
+              prefixIcon: Icon(Icons.phone_android),
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        CheckboxListTile(
-          contentPadding: EdgeInsets.zero,
-          value: _consentAccepted,
-          onChanged: _submitting
-              ? null
-              : (value) => setState(() => _consentAccepted = value ?? false),
-          title: const Text('Privacy consent'),
-          subtitle: const Text(appPrivacyConsentText),
-        ),
-        if (_errorMessage != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            _errorMessage!,
-            style: const TextStyle(color: EnterpriseTheme.error),
+          const SizedBox(height: 12),
+          CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _consentAccepted,
+            onChanged: _submitting
+                ? null
+                : (value) => setState(() => _consentAccepted = value ?? false),
+            title: const Text('Privacy consent'),
+            subtitle: const Text(appPrivacyConsentText),
+          ),
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _errorMessage!,
+              style: const TextStyle(color: EnterpriseTheme.error),
+            ),
+          ],
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _submitting ? null : _register,
+            icon: _submitting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.person_add_alt_1),
+            label: const Text('Register New User'),
+          ),
+          TextButton(
+            onPressed: _submitting
+                ? null
+                : () => setState(() {
+                    _showRegister = false;
+                    _errorMessage = null;
+                  }),
+            child: const Text('Back to Login'),
           ),
         ],
-        const SizedBox(height: 12),
-        FilledButton.icon(
-          onPressed: _submitting ? null : _register,
-          icon: _submitting
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.person_add_alt_1),
-          label: const Text('Register New User'),
-        ),
-        TextButton(
-          onPressed: _submitting
-              ? null
-              : () => setState(() {
-                  _showRegister = false;
-                  _errorMessage = null;
-                }),
-          child: const Text('Back to Login'),
-        ),
-      ],
+      ),
     );
   }
 
   Widget _forgotPasswordForm() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        TextField(
-          controller: _resetEmail,
-          keyboardType: TextInputType.emailAddress,
-          decoration: const InputDecoration(
-            labelText: 'Email',
-            prefixIcon: Icon(Icons.email_outlined),
+    return AutofillGroup(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _resetEmail,
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.done,
+            autofillHints: const [AutofillHints.email, AutofillHints.username],
+            decoration: const InputDecoration(
+              labelText: 'Email',
+              prefixIcon: Icon(Icons.email_outlined),
+            ),
           ),
-        ),
-        if (_errorMessage != null) ...[
           const SizedBox(height: 8),
-          Text(
-            _errorMessage!,
-            style: const TextStyle(color: EnterpriseTheme.error),
+          const Text(
+            'This resets your app/Firebase password, not your Gmail password.',
+            style: TextStyle(color: Color(0xFF64748B), fontSize: 12),
+          ),
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _errorMessage!,
+              style: const TextStyle(color: EnterpriseTheme.error),
+            ),
+          ],
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: _submitting ? null : _sendPasswordReset,
+            icon: _submitting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.mark_email_read_outlined),
+            label: const Text('Send Reset Link'),
+          ),
+          TextButton(
+            onPressed: _submitting
+                ? null
+                : () => setState(() {
+                    _showForgotPassword = false;
+                    _errorMessage = null;
+                  }),
+            child: const Text('Back to Login'),
           ),
         ],
-        const SizedBox(height: 16),
-        FilledButton.icon(
-          onPressed: _submitting ? null : _sendPasswordReset,
-          icon: _submitting
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.mark_email_read_outlined),
-          label: const Text('Forgot Password'),
-        ),
-        TextButton(
-          onPressed: _submitting
-              ? null
-              : () => setState(() {
-                  _showForgotPassword = false;
-                  _errorMessage = null;
-                }),
-          child: const Text('Back to Login'),
-        ),
-      ],
+      ),
     );
   }
 
@@ -418,13 +507,16 @@ class _OwnerLoginGateState extends ConsumerState<OwnerLoginGate> {
       _errorMessage = null;
     });
     try {
+      final email = _normalizedEmail(_email.text);
       final profile = await _loginService.signIn(
-        email: _email.text,
+        email: email,
         password: _password.text,
       );
       if (!mounted) {
         return;
       }
+      await _rememberSuccessfulLogin(email);
+      TextInput.finishAutofillContext(shouldSave: true);
       _applyProfile(profile);
     } on FirebaseLoginException catch (error) {
       if (mounted) {
@@ -449,7 +541,7 @@ class _OwnerLoginGateState extends ConsumerState<OwnerLoginGate> {
     try {
       final profile = await _loginService.register(
         name: _registerName.text,
-        email: _registerEmail.text,
+        email: _normalizedEmail(_registerEmail.text),
         password: _registerPassword.text,
         mobile: _registerMobile.text,
         consentAccepted: _consentAccepted,
@@ -457,6 +549,7 @@ class _OwnerLoginGateState extends ConsumerState<OwnerLoginGate> {
       if (!mounted) {
         return;
       }
+      TextInput.finishAutofillContext(shouldSave: true);
       _applyProfile(profile);
     } on FirebaseLoginException catch (error) {
       if (mounted) {
@@ -483,9 +576,12 @@ class _OwnerLoginGateState extends ConsumerState<OwnerLoginGate> {
       _errorMessage = null;
     });
     try {
-      await _loginService.sendPasswordReset(_resetEmail.text);
+      await _loginService.sendPasswordReset(_normalizedEmail(_resetEmail.text));
       if (mounted) {
-        _snack(context, 'Password reset email sent.');
+        _snack(
+          context,
+          'If this email is registered, a reset link has been sent. Please check Inbox, Spam, and Promotions.',
+        );
         setState(() => _showForgotPassword = false);
       }
     } on FirebaseLoginException catch (error) {
@@ -783,12 +879,14 @@ class _PurchaseEditorScreenState extends ConsumerState<PurchaseEditorScreen> {
             _seller!.id,
             excludingPurchaseId: originalPurchase?.id,
           );
-    var availablePreviousBalance = roundMoneyValue(
-      previousBalanceReferences.fold<double>(
-        0,
-        (runningTotal, item) => runningTotal + item.balanceAmount,
-      ),
-    );
+    var availablePreviousBalance = _editing
+        ? roundMoneyValue(
+            previousBalanceReferences.fold<double>(
+              0,
+              (runningTotal, item) => runningTotal + item.balanceAmount,
+            ),
+          )
+        : 0.0;
     if (availablePreviousBalance.abs() <= 0.01 &&
         originalPurchase != null &&
         originalPurchase.previousBalanceAppliedAmount.abs() > 0.01 &&
@@ -796,7 +894,7 @@ class _PurchaseEditorScreenState extends ConsumerState<PurchaseEditorScreen> {
       availablePreviousBalance = originalPurchase.previousBalanceAppliedAmount;
     }
     final previousBalanceToApply =
-        _previousBalanceAction == _PreviousBalanceAction.apply
+        _editing && _previousBalanceAction == _PreviousBalanceAction.apply
         ? availablePreviousBalance
         : 0.0;
     final billBeforeSettlement = roundMoneyValue(
@@ -806,7 +904,8 @@ class _PurchaseEditorScreenState extends ConsumerState<PurchaseEditorScreen> {
       billBeforeSettlement - paidForCurrentBill,
     );
     final settlementAdjustment =
-        _settlementAction == _CurrentBillSettlementAction.settleNow &&
+        _editing &&
+            _settlementAction == _CurrentBillSettlementAction.settleNow &&
             currentBillDifference.abs() > 0.01
         ? roundMoneyValue(paidForCurrentBill - billBeforeSettlement)
         : 0.0;
@@ -861,7 +960,7 @@ class _PurchaseEditorScreenState extends ConsumerState<PurchaseEditorScreen> {
             if (_seller != null) ...[
               const SizedBox(height: 10),
               SellerSnapshot(seller: _seller!),
-              if (availablePreviousBalance.abs() > 0.01) ...[
+              if (_editing && availablePreviousBalance.abs() > 0.01) ...[
                 const SizedBox(height: 10),
                 FeaturePanel(
                   child: Column(
@@ -1089,7 +1188,7 @@ class _PurchaseEditorScreenState extends ConsumerState<PurchaseEditorScreen> {
                         ? EnterpriseTheme.warning
                         : EnterpriseTheme.success,
                   ),
-                  if (currentBillDifference.abs() > 0.01) ...[
+                  if (_editing && currentBillDifference.abs() > 0.01) ...[
                     const Divider(height: 18),
                     AmountLine(
                       label: currentBillDifference > 0
@@ -1320,7 +1419,7 @@ class _PurchaseEditorScreenState extends ConsumerState<PurchaseEditorScreen> {
         _remarks.text = draft.remarks.trim();
         confirmations.add('Remarks added');
       }
-      if (draft.applyPreviousBalance) {
+      if (draft.applyPreviousBalance && _editing) {
         _previousBalanceAction = _PreviousBalanceAction.apply;
         confirmations.add('Previous balance selected');
       }
@@ -1361,6 +1460,17 @@ class _PurchaseEditorScreenState extends ConsumerState<PurchaseEditorScreen> {
       return true;
     }
     if (text.contains('apply previous balance')) {
+      if (!_editing) {
+        _snack(
+          context,
+          'Previous bill settlement is not shown in New Purchase.',
+        );
+        _setVoiceState('Ready');
+        await _speakVoice(
+          'Previous bill settlement is not shown in new purchase',
+        );
+        return true;
+      }
       setState(() {
         _previousBalanceAction = _PreviousBalanceAction.apply;
         _voiceStatus = 'Recognized...';
@@ -1559,16 +1669,20 @@ class _PurchaseEditorScreenState extends ConsumerState<PurchaseEditorScreen> {
       return;
     }
     final state = ref.read(businessProvider);
-    var previousReferences = state.previousBalanceReferencesForSeller(
-      _seller!.id,
-      excludingPurchaseId: original?.id,
-    );
-    var availablePreviousBalance = roundMoneyValue(
-      previousReferences.fold<double>(
-        0,
-        (runningTotal, item) => runningTotal + item.balanceAmount,
-      ),
-    );
+    var previousReferences = original == null
+        ? <SellerBalanceReference>[]
+        : state.previousBalanceReferencesForSeller(
+            _seller!.id,
+            excludingPurchaseId: original.id,
+          );
+    var availablePreviousBalance = original == null
+        ? 0.0
+        : roundMoneyValue(
+            previousReferences.fold<double>(
+              0,
+              (runningTotal, item) => runningTotal + item.balanceAmount,
+            ),
+          );
     if (availablePreviousBalance.abs() <= 0.01 &&
         original != null &&
         original.previousBalanceAppliedAmount.abs() > 0.01 &&
@@ -1576,12 +1690,14 @@ class _PurchaseEditorScreenState extends ConsumerState<PurchaseEditorScreen> {
       availablePreviousBalance = original.previousBalanceAppliedAmount;
     }
     final previousBalanceAppliedAmount =
-        _previousBalanceAction == _PreviousBalanceAction.apply
+        original != null &&
+            _previousBalanceAction == _PreviousBalanceAction.apply
         ? availablePreviousBalance
         : 0.0;
     final previousReferenceIds =
-        _previousBalanceAction == _PreviousBalanceAction.apply
-        ? (previousReferences.isEmpty && original != null
+        original != null &&
+            _previousBalanceAction == _PreviousBalanceAction.apply
+        ? (previousReferences.isEmpty
               ? original.previousBalanceReferenceIds
               : previousReferences.map((item) => item.purchaseId).toList())
         : <String>[];
@@ -1602,7 +1718,8 @@ class _PurchaseEditorScreenState extends ConsumerState<PurchaseEditorScreen> {
       billBeforeSettlement - paidAmount,
     );
     final currentSettlementAdjustmentAmount =
-        _settlementAction == _CurrentBillSettlementAction.settleNow &&
+        original != null &&
+            _settlementAction == _CurrentBillSettlementAction.settleNow &&
             currentBillDifference.abs() > 0.01
         ? roundMoneyValue(paidAmount - billBeforeSettlement)
         : 0.0;
@@ -1616,8 +1733,9 @@ class _PurchaseEditorScreenState extends ConsumerState<PurchaseEditorScreen> {
       }
       return;
     }
-    final settlementStatus =
-        _settlementAction == _CurrentBillSettlementAction.settleNow
+    final settlementStatus = original == null
+        ? 'carry_forward'
+        : _settlementAction == _CurrentBillSettlementAction.settleNow
         ? 'settled_current_difference'
         : switch (_previousBalanceAction) {
             _PreviousBalanceAction.apply => 'previous_balance_applied',
@@ -1836,7 +1954,7 @@ class _PreviousBalanceReferenceRow extends StatelessWidget {
 }
 
 const _purchaseVoiceHelpText =
-    'New Purchase screen. You can say seller name, material, weight, rate, paid amount, apply previous balance, clear purchase, add item, save purchase.';
+    'New Purchase screen. You can say seller name, material, weight, rate, paid amount, clear purchase, add item, save purchase.';
 
 bool _isVoiceSaveCommand(String command) {
   final text = normalizeSmartVoiceCommand(command);
@@ -11265,7 +11383,8 @@ class ExportBar extends StatelessWidget {
             XFile.fromData(
               Uint8List.fromList(bytes),
               name: fileName,
-              mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              mimeType:
+                  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             ),
           ],
           fileNameOverrides: [fileName],
@@ -14314,6 +14433,8 @@ void _addToMap(Map<String, double> target, String key, double value) {
 double _read(TextEditingController controller) {
   return double.tryParse(controller.text.trim()) ?? 0;
 }
+
+String _normalizedEmail(String value) => value.trim().toLowerCase();
 
 double _effectiveWeightFor(double actualWeight, MaterialStock material) {
   final deduction = material.normalizedWastageDeductionPercent;
