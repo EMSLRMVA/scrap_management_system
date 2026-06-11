@@ -35,14 +35,7 @@ class FirebaseBootstrap {
       if (Firebase.apps.isNotEmpty) {
         return const FirebaseStatus(isReady: true);
       }
-
-      if (kIsWeb) {
-        await Firebase.initializeApp(
-          options: DefaultFirebaseOptions.web,
-        );
-      } else {
-        await Firebase.initializeApp();
-      }
+      await _initializeFirebaseApp();
 
       return const FirebaseStatus(isReady: true);
     } catch (error) {
@@ -52,5 +45,12 @@ class FirebaseBootstrap {
             'Firebase configuration was not found. Running in offline demo mode. $error',
       );
     }
+  }
+
+  static Future<void> _initializeFirebaseApp() {
+    if (kIsWeb) {
+      return Firebase.initializeApp(options: DefaultFirebaseOptions.web);
+    }
+    return Firebase.initializeApp();
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/app_branding.dart';
@@ -73,7 +74,7 @@ class _FirebaseStartupGateState extends State<FirebaseStartupGate> {
   }
 
   void _preparePushNotifications() {
-    if (_pushPrepared) {
+    if (kIsWeb || _pushPrepared) {
       return;
     }
     _pushPrepared = true;
