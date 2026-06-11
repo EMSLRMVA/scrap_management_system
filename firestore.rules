@@ -1,0 +1,209 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function authEmail() {
+      return request.auth.token.email;
+    }
+
+    function ownerEmail() {
+      return 'scrap.emslrmva@gmail.com';
+    }
+
+    function userDocPath(userId) {
+      return /databases/$(database)/documents/users/$(userId);
+    }
+
+    function ownUserDocExists() {
+      return signedIn() && exists(userDocPath(request.auth.uid));
+    }
+
+    function ownUserData() {
+      return get(userDocPath(request.auth.uid)).data;
+    }
+
+    function signedInOwner() {
+      return signedIn()
+        && ownUserDocExists()
+        && ownUserData().role in ['owner', 'admin']
+        && ownUserData().active == true;
+    }
+
+    function activeSignedInUser() {
+      return signedIn()
+        && ownUserDocExists()
+        && ownUserData().active == true;
+    }
+
+    function ownerBootstrap(userId) {
+      return signedIn()
+        && authEmail() == ownerEmail()
+        && userId == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == ownerEmail()
+        && request.resource.data.role == 'owner'
+        && request.resource.data.active == true;
+    }
+
+    function publicUserRegistration(userId) {
+      return signedIn()
+        && userId == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == authEmail()
+        && request.resource.data.role == 'user'
+        && request.resource.data.active == true
+        && request.resource.data.consentAccepted == true;
+    }
+
+    function ownLastActiveUpdate(userId) {
+      return activeSignedInUser()
+        && userId == request.auth.uid
+        && request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly(['lastActiveAt', 'lastLoginAt']);
+    }
+
+    function ownLogCreate() {
+      return activeSignedInUser()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.email == authEmail()
+        && request.resource.data.role == ownUserData().role;
+    }
+
+    function entryWithin74Minutes() {
+      return resource.data.createdAt is timestamp
+        && request.time <= resource.data.createdAt + duration.value(74, 'm');
+    }
+
+    function timedEditDeleteRole() {
+      return ownUserData().role in ['manager', 'supervisor'];
+    }
+
+    function preservesCreatedAt() {
+      return !(resource.data.createdAt is timestamp)
+        || request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    function canEditDeleteExistingEntry() {
+      return signedInOwner()
+        || (activeSignedInUser()
+          && timedEditDeleteRole()
+          && entryWithin74Minutes()
+          && preservesCreatedAt());
+    }
+
+    match /users/{userId} {
+      allow read: if signedInOwner() || (signedIn() && userId == request.auth.uid);
+      allow create: if signedInOwner()
+        || ownerBootstrap(userId)
+        || publicUserRegistration(userId);
+      allow update: if signedInOwner()
+        || ownerBootstrap(userId)
+        || ownLastActiveUpdate(userId);
+      allow delete: if signedInOwner();
+    }
+
+    match /loginLogs/{logId} {
+      allow read, update, delete: if signedInOwner();
+      allow create: if ownLogCreate();
+    }
+
+    match /activityLogs/{logId} {
+      allow read, update, delete: if signedInOwner();
+      allow create: if ownLogCreate();
+    }
+
+    match /ownerNotifications/{id} {
+      allow read, update, delete: if signedInOwner();
+      allow create: if activeSignedInUser()
+        && request.resource.data.userId == request.auth.uid;
+    }
+
+    match /owner_view_as_logs/{id} {
+      allow read, create: if signedInOwner();
+      allow update, delete: if signedInOwner();
+    }
+
+    match /{collection}/{docId} {
+      allow read, write: if signedInOwner()
+        && collection in [
+          'sellers',
+          'customers',
+          'inventory',
+          'purchases',
+          'sales',
+          'expenses',
+          'cash_allocations',
+          'openingStocks',
+          'physicalStocks',
+          'manualReminderLogs',
+          'audit_trail',
+          'activities',
+          'dashboard',
+          'owner_view_as_logs'
+        ];
+
+      allow read: if activeSignedInUser()
+        && collection in [
+          'sellers',
+          'customers',
+          'inventory',
+          'purchases',
+          'sales',
+          'expenses',
+          'cash_allocations',
+          'openingStocks',
+          'physicalStocks',
+          'activities',
+          'dashboard'
+        ];
+
+      allow create, update: if activeSignedInUser()
+        && collection in [
+          'sellers',
+          'customers',
+          'activities'
+        ];
+
+      allow create: if activeSignedInUser()
+        && collection in [
+          'purchases',
+          'sales',
+          'expenses',
+          'physicalStocks',
+          'manualReminderLogs',
+          'audit_trail'
+        ];
+
+      allow update: if activeSignedInUser()
+        && collection in [
+          'purchases',
+          'sales',
+          'expenses',
+          'cash_allocations',
+          'openingStocks',
+          'physicalStocks'
+        ]
+        && canEditDeleteExistingEntry();
+
+      allow update: if activeSignedInUser()
+        && collection == 'inventory'
+        && canEditDeleteExistingEntry()
+        && request.resource.data.diff(resource.data).changedKeys()
+          .hasOnly([
+            'availableKg',
+            'currentBuyingRate',
+            'stockValue',
+            'updatedAt',
+            'updatedBy',
+            'deletedAt',
+            'deletedBy',
+            'isDeleted',
+            'isActive'
+          ]);
+    }
+  }
+}

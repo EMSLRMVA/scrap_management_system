@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="EMSLRMVA Export Scrap System">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Scrap System">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>Scrap System</title>
+  <link rel="manifest" href="manifest.json">
+  <style>
+    #app-update-banner {
+      position: fixed;
+      left: 16px;
+      right: 16px;
+      bottom: 16px;
+      z-index: 9999;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #ffffff;
+      box-shadow: 0 16px 36px rgba(15, 23, 42, 0.28);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    #app-update-banner button {
+      border: 0;
+      border-radius: 8px;
+      padding: 8px 10px;
+      background: #2563eb;
+      color: #ffffff;
+      font: inherit;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <div id="app-update-banner" role="status" aria-live="polite">
+    <span>New update available</span>
+    <button type="button" id="app-update-refresh">Refresh now</button>
+  </div>
+  <script>
+    (function () {
+      const versionKey = 'scrap_system_web_build';
+      const checkIntervalMs = 15 * 60 * 1000;
+
+      function latestVersionId(data) {
+        return [data.version, data.build_number, data.build_signature]
+          .filter(Boolean)
+          .join('+');
+      }
+
+      function showUpdateBanner(nextVersion) {
+        const banner = document.getElementById('app-update-banner');
+        const refresh = document.getElementById('app-update-refresh');
+        if (!banner || !refresh) {
+          return;
+        }
+        banner.style.display = 'flex';
+        refresh.onclick = function () {
+          try {
+            window.localStorage.setItem(versionKey, nextVersion);
+          } catch (_) {
+            // Storage can be disabled; reload still gets the latest deployment.
+          }
+          window.location.reload();
+        };
+      }
+
+      async function checkForWebUpdate() {
+        try {
+          const response = await fetch('version.json?ts=' + Date.now(), {
+            cache: 'no-store',
+          });
+          if (!response.ok) {
+            return;
+          }
+          const version = latestVersionId(await response.json());
+          if (!version) {
+            return;
+          }
+          const current = window.localStorage.getItem(versionKey);
+          if (current && current !== version) {
+            showUpdateBanner(version);
+            return;
+          }
+          window.localStorage.setItem(versionKey, version);
+        } catch (_) {
+          // Offline or first install; Flutter continues to boot normally.
+        }
+      }
+
+      window.addEventListener('load', function () {
+        checkForWebUpdate();
+        window.setInterval(checkForWebUpdate, checkIntervalMs);
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.ready
+            .then(function (registration) {
+              registration.update();
+              window.setInterval(function () {
+                registration.update();
+              }, 60 * 60 * 1000);
+            })
+            .catch(function () {});
+        }
+      });
+    })();
+  </script>
+  <!--
+    You can customize the "flutter_bootstrap.js" script.
+    This is useful to provide a custom configuration to the Flutter loader
+    or to give the user feedback during the initialization process.
+
+    For more details:
+    * https://docs.flutter.dev/platform-integration/web/initialization
+  -->
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
